@@ -6,6 +6,7 @@ import { parseWorkbook } from '../lib/parse';
 import { runEngine, diffResults } from '../lib/engine';
 import { OUTCOMES, DEFAULT_PROFILE } from '../lib/constants';
 import Home from './components/Home';
+import Logo from './components/Logo';
 import Upload from './components/Upload';
 import TerritoryBoard from './components/TerritoryBoard';
 import ApplicantList, { ApplicantDialog, sortDecisions, nextScheduled } from './components/ApplicantList';
@@ -238,7 +239,7 @@ export default function Page() {
     <div className="app">
       <aside className="side">
         <button className="brand" onClick={() => { setScreen('home'); setOpenId(null); }} aria-label="FranchEyes home">
-          <span className="brand-mark sk" aria-hidden="true">👁</span>
+          <Logo />
           <b>FranchEyes</b>
         </button>
 
