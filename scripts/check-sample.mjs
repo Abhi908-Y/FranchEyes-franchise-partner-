@@ -3,7 +3,7 @@
 import fs from 'node:fs';
 import { parseWorkbook } from '../lib/parse.js';
 import { runEngine, diffResults } from '../lib/engine.js';
-import { DEFAULT_PROFILE, EDITABLE_FIELDS } from '../lib/constants.js';
+import { DEFAULT_PROFILE, EDITABLE_FIELDS, profileFor } from '../lib/constants.js';
 import { validUpdates } from '../lib/chatLocal.js';
 
 const expected = {
@@ -44,6 +44,25 @@ const changes = diffResults(r, r2);
 check(r2.decisions['APP-012'].outcome === 'Recommended', `After update, APP-012 → Recommended (got ${r2.decisions['APP-012'].outcome})`);
 check(r2.decisions['APP-013'].outcome === 'Waitlist', `After update, APP-013 → Waitlist, pin 572101 taken (got ${r2.decisions['APP-013'].outcome})`);
 check(changes.length === 2, `Update reports exactly 2 changes (got ${changes.length})`);
+
+// Readiness score: every applicant gets one, and it matches the allocation score wherever that exists.
+const ds = Object.values(r.decisions);
+check(ds.every((d) => Number.isInteger(d.readiness?.total) && d.readiness.total >= 0 && d.readiness.total <= 100 && d.readiness.band),
+  `Every applicant has a readiness score 0-100 with a label (${ds.map((d) => `${d.id} ${d.readiness?.total}`).join(', ')})`);
+check(ds.filter((d) => d.score !== null).every((d) => d.readiness.total === d.score),
+  'Readiness equals the allocation score for every applicant who passed all checks');
+
+// Category rules. Eyewear (Lenskart) must match the defaults exactly; a gym allows upper floors and needs more space.
+const eye = runEngine(data, profileFor('eyewear', 'Lenskart'));
+check(ds.every((d) => eye.decisions[d.id].outcome === d.outcome && eye.decisions[d.id].readiness.total === d.readiness.total),
+  'Eyewear category gives exactly the default outcomes and readiness scores');
+const gym = runEngine(data, profileFor('fitness', 'Cult.fit'));
+const gymReasons = Object.values(gym.decisions).flatMap((d) => d.issues.map((h) => h.issue));
+check(!gymReasons.some((t) => /upper floor/i.test(t)), `Gym category never holds anyone for an upper floor (got: ${gymReasons.filter((t) => /upper floor/i.test(t)).join(' | ') || 'none'})`);
+check(gym.decisions['APP-012'].issues.some((h) => /below the 2500 sq ft minimum/.test(h.issue)),
+  `Gym category holds APP-012 for size, not floor (got: ${gym.decisions['APP-012'].reason})`);
+check(Object.values(gym.decisions).filter((d) => d.score !== null).every((d) => d.readiness.total === d.score),
+  'Gym category: readiness still equals the allocation score for everyone who passed all checks');
 
 // Chat update that clears a field: APP-017 hasn't found a shop, so its size and floor are wiped.
 const cleared = validUpdates([

@@ -12,7 +12,7 @@ function suggestions(result) {
   const ds = Object.values(result.decisions);
   const hold = ds.find((d) => d.outcome === 'Hold');
   const wait = ds.find((d) => d.outcome === 'Waitlist');
-  const upper = ds.find((d) => d.outcome === 'Hold' && d.applicant.floor === 'Upper');
+  const upper = ds.find((d) => d.outcome === 'Hold' && d.issues.some((h) => /upper floor/i.test(h.issue)));
   const out = [];
   if (hold) out.push(`Why is ${hold.id} on hold?`);
   if (wait) out.push(`Why didn’t ${wait.id} get a slot?`);
@@ -29,7 +29,7 @@ function Linkify({ text, onApplicant, ids }) {
   );
 }
 
-export default function Chat({ result, profile, messages, setMessages, applyUpdates, onApplicant }) {
+export default function Chat({ result, profile, personal, messages, setMessages, applyUpdates, onApplicant }) {
   const [text, setText] = useState('');
   const [busy, setBusy] = useState(false);
   const [offline, setOffline] = useState(false);
@@ -46,7 +46,7 @@ export default function Chat({ result, profile, messages, setMessages, applyUpda
         const r = await fetch('/api/chat', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ message, history, snapshot: buildSnapshot(result, profile) }),
+          body: JSON.stringify({ message, history, snapshot: buildSnapshot(result, profile, personal) }),
         });
         if (r.status === 503) setOffline(true);
         if (r.ok) reply = await r.json();

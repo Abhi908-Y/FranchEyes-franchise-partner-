@@ -1,11 +1,75 @@
 'use client';
 
-import { useState } from 'react';
-import { PIPELINE, EDITABLE_FIELDS } from '../../lib/constants';
+import { useEffect, useRef, useState } from 'react';
+import { PIPELINE } from '../../lib/constants';
 
 const ORDER = { Recommended: 0, Waitlist: 1, Hold: 2, Reject: 3 };
 const OUTCOME_LABEL = { Recommended: 'Recommended', Waitlist: 'Waitlist', Hold: 'On hold', Reject: 'Rejected' };
+const TONE = { Ready: 'ok', 'Nearly ready': 'warn', 'Not ready': 'hot' };
+const MAX = { investment: 30, experience: 20, space: 25, floor: 15, launch: 10 };
+const PART_LABEL = { investment: 'Investment', experience: 'Experience', space: 'Space', floor: 'Floor', launch: 'Launch timing' };
 const show = (v, unit = '') => (v === null || v === undefined || v === '' ? '—' : `${v}${unit}`);
+
+// Outcome first, then readiness, then ID. Used by the list and the download.
+export function sortDecisions(ds) {
+  return [...ds].sort((x, y) =>
+    ORDER[x.outcome] - ORDER[y.outcome] || y.readiness.total - x.readiness.total || x.id.localeCompare(y.id, undefined, { numeric: true }));
+}
+
+function Segs({ r }) {
+  const on = Math.round(r.total / 10);
+  return (
+    <span className="ready" data-tone={TONE[r.band]}>
+      <span className="segs" aria-hidden="true">
+        {Array.from({ length: 10 }).map((_, i) => <span key={i} className={`seg${i < on ? ' on' : ''}`} />)}
+      </span>
+      <span className="ready-label">{r.band}</span>
+    </span>
+  );
+}
+
+export default function ApplicantList({ list, onOpen, flash, review, bookmarks, notes, onToggleBookmark, emptyText }) {
+  if (!list.length) return <p className="empty">{emptyText || 'No applicants match this view.'}</p>;
+  return (
+    <ul className="list">
+      {sortDecisions(list).map((d, i) => {
+        const a = d.applicant;
+        const r = review[d.id];
+        const marked = !!bookmarks[d.id];
+        return (
+          <li key={d.id} id={`app-${d.id}`} className={flash.includes(d.id) ? 'flash' : ''}>
+            <button
+              className={`star${marked ? ' on' : ''}`}
+              aria-pressed={marked}
+              aria-label={marked ? `Remove ${d.id} from bookmarks` : `Bookmark ${d.id}`}
+              title={marked ? 'Bookmarked' : 'Bookmark'}
+              onClick={() => onToggleBookmark(d.id)}
+            >
+              {marked ? '★' : '☆'}
+            </button>
+            <button className="row" onClick={() => onOpen(d.id)} aria-label={`${d.id} ${a.name || ''}: ${OUTCOME_LABEL[d.outcome]}, franchisee readiness score ${d.readiness.total}. Open details`}>
+              <span className="rank num">{i + 1}</span>
+              <span className="who">
+                <span className="name">
+                  {a.name || 'No name'} <span className="id">{d.id}</span>
+                  <span className={`chip o-${d.outcome}`}>{OUTCOME_LABEL[d.outcome]}</span>
+                  {d.updatedFields ? <span className="chip upd">Updated, verify</span> : null}
+                  {r?.status === 'confirmed' ? <span className="chip o-Recommended">Onboarding: {r.stage >= PIPELINE.length ? 'ready to open' : PIPELINE[r.stage].toLowerCase()}</span> : null}
+                  {r?.status === 'declined' ? <span className="chip o-Reject">Declined by you</span> : null}
+                </span>
+                <span className="one">{d.reason}</span>
+                <span className="meta-line">{a.city || 'No city'}, {a.pin || 'no pin'}{d.territoryId ? ` · ${d.territoryId}` : ' · no territory'}</span>
+                {notes[d.id] ? <span className="note-line">📝 {notes[d.id]}</span> : null}
+              </span>
+              <span className="stat"><b className="num">{d.readiness.total}</b><span>Franchisee readiness score</span></span>
+              <Segs r={d.readiness} />
+            </button>
+          </li>
+        );
+      })}
+    </ul>
+  );
+}
 
 function Facts({ a, updated }) {
   const rows = [
@@ -34,19 +98,28 @@ function Facts({ a, updated }) {
   );
 }
 
-function ScoreBars({ d }) {
-  if (!d.scoreParts) return null;
-  const max = { investment: 30, experience: 20, space: 25, floor: 15, launch: 10 };
-  const label = { investment: 'Investment', experience: 'Experience', space: 'Space', floor: 'Floor', launch: 'Launch timing' };
+// Why a readiness part scored 0, in plain words.
+function zeroReason(k, d) {
+  const a = d.applicant;
+  if (k === 'investment') return a.investment === null ? 'not given' : !d.minInvestment ? 'no tier to compare against' : `below the ₹${d.minInvestment} lakh minimum`;
+  if (k === 'experience') return a.experience === null ? 'not given' : 'under 1 year';
+  if (k === 'space') return a.space ? 'no shop yet' : 'not given';
+  if (k === 'floor') return !d.readiness.parts.space ? 'no shop yet' : a.floor === 'Upper' ? 'upper floor' : 'floor not known';
+  return '';
+}
+
+function ReadinessBars({ d }) {
+  const zeros = Object.entries(d.readiness.parts).filter(([k, v]) => v === 0 && zeroReason(k, d));
   return (
     <div className="bars">
-      {Object.entries(d.scoreParts).map(([k, v]) => (
+      {Object.entries(d.readiness.parts).map(([k, v]) => (
         <div className="bar" key={k}>
-          <span>{label[k]}</span>
-          <span className="track"><span className="fill" style={{ width: `${(v / max[k]) * 100}%`, display: 'block' }} /></span>
-          <span className="num">{v}/{max[k]}</span>
+          <span>{PART_LABEL[k]}</span>
+          <span className="track"><span className={`fill${v ? '' : ' zero'}`} style={{ width: `${(v / MAX[k]) * 100}%` }} /></span>
+          <span className="v num">{v}/{MAX[k]}</span>
         </div>
       ))}
+      {zeros.length ? <p className="muted">Scored 0: {zeros.map(([k]) => `${PART_LABEL[k].toLowerCase()} (${zeroReason(k, d)})`).join(', ')}.</p> : null}
     </div>
   );
 }
@@ -60,14 +133,14 @@ function Email({ email }) {
       <pre>{email.body}</pre>
       <div className="acts">
         <button
-          className="btn"
+          className="mini-btn"
           onClick={async () => {
             try { await navigator.clipboard.writeText(`Subject: ${email.subject}\n\n${email.body}`); setCopied(true); setTimeout(() => setCopied(false), 1500); } catch {}
           }}
         >
           {copied ? 'Copied' : 'Copy email'}
         </button>
-        <a className="btn" href={mailto}>Open in email app</a>
+        <a className="mini-btn" href={mailto}>Open in email app</a>
         <small>The sheet has no contact details, so add the address in your email app.</small>
       </div>
     </div>
@@ -80,10 +153,10 @@ function Review({ d, review, setReview }) {
   if (!r) {
     return (
       <div>
-        <h4>Your review</h4>
+        <h3>Your review</h3>
         <div className="review">
-          <button className="btn primary" onClick={() => setReview({ ...review, [d.id]: { status: 'confirmed', stage: 0 } })}>Confirm and start onboarding</button>
-          <button className="btn" onClick={() => setReview({ ...review, [d.id]: { status: 'declined' } })}>Decline</button>
+          <button className="btn" onClick={() => setReview({ ...review, [d.id]: { status: 'confirmed', stage: 0 } })}>Confirm and start onboarding</button>
+          <button className="btn ghost" onClick={() => setReview({ ...review, [d.id]: { status: 'declined' } })}>Decline</button>
         </div>
       </div>
     );
@@ -91,17 +164,17 @@ function Review({ d, review, setReview }) {
   if (r.status === 'declined') {
     return (
       <div>
-        <h4>Your review</h4>
+        <h3>Your review</h3>
         <div className="review">
           <span className="declined">You declined this recommendation.</span>
-          <button className="btn quiet" onClick={() => { const c = { ...review }; delete c[d.id]; setReview(c); }}>Undo</button>
+          <button className="mini-btn" onClick={() => { const c = { ...review }; delete c[d.id]; setReview(c); }}>Undo</button>
         </div>
       </div>
     );
   }
   return (
     <div>
-      <h4>Onboarding</h4>
+      <h3>Onboarding</h3>
       <div className="pipe" role="list">
         {PIPELINE.map((s, i) => (
           <div role="listitem" key={s} className={`stage${i < r.stage ? ' done' : ''}${i === r.stage ? ' now' : ''}`}>{s}</div>
@@ -109,28 +182,89 @@ function Review({ d, review, setReview }) {
       </div>
       <div className="review" style={{ marginTop: 10 }}>
         {r.stage < PIPELINE.length ? (
-          <button className="btn primary" onClick={() => setReview({ ...review, [d.id]: { ...r, stage: r.stage + 1 } })}>
+          <button className="btn" onClick={() => setReview({ ...review, [d.id]: { ...r, stage: r.stage + 1 } })}>
             Mark “{PIPELINE[r.stage]}” done
           </button>
-        ) : <span>Ready to open.</span>}
-        {r.stage > 0 ? <button className="btn quiet" onClick={() => setReview({ ...review, [d.id]: { ...r, stage: r.stage - 1 } })}>Step back</button> : null}
+        ) : <b>Ready to open.</b>}
+        {r.stage > 0 ? <button className="mini-btn" onClick={() => setReview({ ...review, [d.id]: { ...r, stage: r.stage - 1 } })}>Step back</button> : null}
       </div>
     </div>
   );
 }
 
-function Detail({ d, review, setReview }) {
-  const a = d.applicant;
+// The reviewer's own note. Saved as they type; the list and the chat can see it.
+function NoteBox({ id, note, onNote }) {
+  const [text, setText] = useState(note);
+  const [saved, setSaved] = useState(false);
+  useEffect(() => { setText(note); }, [id]); // eslint-disable-line react-hooks/exhaustive-deps
   return (
-    <div className="detail">
-      <div className="two">
-        <div>
-          <h4>Application</h4>
-          <Facts a={a} updated={d.updatedFields} />
-        </div>
-        <div style={{ display: 'grid', gap: 18, alignContent: 'start' }}>
-          <div className={`t-${d.outcome}`}>
-            <h4>Why {OUTCOME_LABEL[d.outcome].toLowerCase()}</h4>
+    <div>
+      <h3><label htmlFor={`note-${id}`}>Your note</label></h3>
+      <textarea
+        id={`note-${id}`}
+        className="note-box"
+        value={text}
+        placeholder="What you like about this candidate, what to check, follow-ups…"
+        onChange={(e) => { setText(e.target.value); onNote(id, e.target.value); setSaved(true); }}
+      />
+      <div className="muted">{saved ? 'Saved in this browser.' : 'Only you can see this. It’s saved in this browser.'}</div>
+    </div>
+  );
+}
+
+export function ApplicantDialog({ d, onClose, review, setReview, bookmarked, onToggleBookmark, note, onNote }) {
+  const ref = useRef(null);
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    if (d && !el.open) el.showModal();
+    if (!d && el.open) el.close();
+  }, [d]);
+
+  return (
+    <dialog
+      ref={ref}
+      className="dialog"
+      onClose={onClose}
+      onClick={(e) => { if (e.target === ref.current) onClose(); }}
+      aria-labelledby="d-title"
+    >
+      {d ? (
+        <div className="dialog-body">
+          <button className="close" onClick={onClose} aria-label="Close">✕</button>
+          <div className="d-top">
+            <span className="rank num" title="Franchisee readiness score">{d.readiness.total}</span>
+            <div>
+              <h2 id="d-title">{d.applicant.name || 'No name'} <span className="muted">{d.id}</span></h2>
+              <div className="d-chips">
+                <span className={`chip o-${d.outcome}`}>{OUTCOME_LABEL[d.outcome]}</span>
+                <span className="chip">{d.readiness.band}</span>
+                <span className="chip">{d.territoryId ? `${d.territoryId} · ${d.applicant.city || ''}` : 'No territory'}</span>
+                {d.updatedFields ? <span className="chip upd">Updated in chat, verify</span> : null}
+              </div>
+            </div>
+          </div>
+
+          <div className="review">
+            <button className={`btn ${bookmarked ? '' : 'ghost'}`} aria-pressed={bookmarked} onClick={() => onToggleBookmark(d.id)}>
+              {bookmarked ? '★ Bookmarked' : '☆ Bookmark'}
+            </button>
+          </div>
+
+          <div className="d-stats">
+            <div><b className="num">{d.readiness.total}/100</b><span>Franchisee readiness · {d.readiness.band}</span></div>
+            <div>
+              <b className="num">{d.competition ? `#${d.competition.rank} of ${d.competition.of}` : '—'}</b>
+              <span>{d.competition ? `in ${d.territoryId}, needs ${d.competition.bar}+` : 'Not in a slot ranking'}</span>
+            </div>
+            <div>
+              <b className="num">{d.applicant.investment === null ? '—' : `₹${d.applicant.investment}L`}</b>
+              <span>{d.minInvestment ? `Investment · min ₹${d.minInvestment}L` : 'Investment'}</span>
+            </div>
+          </div>
+
+          <div className={`box t-${d.outcome}`}>
+            <h3>Why {OUTCOME_LABEL[d.outcome].toLowerCase()}</h3>
             <ul className="issues">
               {d.outcome === 'Reject' && d.rejectReasons.map((r) => <li key={r} className="bad">{r}</li>)}
               {d.outcome === 'Hold' && d.issues.map((h) => (
@@ -140,86 +274,50 @@ function Detail({ d, review, setReview }) {
               {d.outcome === 'Reject' && d.issues.length ? <li>Also missing: {d.issues.map((h) => h.fix).join(' ')}</li> : null}
               {d.warnings.map((w) => <li key={w} className="warn">{w}</li>)}
             </ul>
-            {d.plan.slotStatus && d.outcome !== 'Reject' ? <p style={{ marginTop: 8, fontSize: 13, color: 'var(--ink-3)' }}>{d.plan.slotStatus}</p> : null}
+            {d.plan.slotStatus && d.outcome !== 'Reject' ? <p className="muted" style={{ marginTop: 8 }}>{d.plan.slotStatus}</p> : null}
+            {d.competition?.rivals.length ? (
+              <p className="muted" style={{ marginTop: 6 }}>Competing with {d.competition.rivals.map((r) => `${r.id} (${r.score})`).join(', ')}.</p>
+            ) : null}
           </div>
-          {d.scoreParts ? (
+
+          <div className="two">
             <div>
-              <h4>Score {d.score}/100{d.competition ? `, rank ${d.competition.rank} of ${d.competition.of} in ${d.territoryId}` : ''}</h4>
-              <ScoreBars d={d} />
-              {d.competition?.rivals.length ? (
-                <p style={{ marginTop: 8, fontSize: 13, color: 'var(--ink-3)' }}>
-                  Competing with {d.competition.rivals.map((r) => `${r.id} (${r.score})`).join(', ')}. Needs {d.competition.bar}+ in this territory.
-                </p>
-              ) : null}
+              <h3>Franchisee readiness score</h3>
+              <ReadinessBars d={d} />
             </div>
-          ) : null}
-        </div>
-      </div>
-
-      <div className="two">
-        <div>
-          <h4>Next steps</h4>
-          <ol className="steps">{d.plan.nextSteps.map((s) => <li key={s}>{s}</li>)}</ol>
-        </div>
-        {d.plan.training ? (
-          <div>
-            <h4>How they’ll be prepared</h4>
-            <div className="training">
-              <b>{d.plan.training.track}</b>, {d.plan.training.weeks} week{d.plan.training.weeks === 1 ? '' : 's'}, in {d.plan.training.language}
-              <div style={{ color: 'var(--ink-3)', fontSize: 13 }}>{d.plan.training.why}</div>
-              <ul>{d.plan.training.modules.map((m) => <li key={m}>{m}</li>)}</ul>
+            <div>
+              <h3>Application</h3>
+              <Facts a={d.applicant} updated={d.updatedFields} />
             </div>
           </div>
-        ) : null}
-      </div>
 
-      <Review d={d} review={review} setReview={setReview} />
+          <NoteBox id={d.id} note={note} onNote={onNote} />
 
-      <div>
-        <h4>Email draft</h4>
-        <Email email={d.plan.email} />
-      </div>
-    </div>
-  );
-}
-
-export default function ApplicantList({ result, filter, openId, setOpenId, flash, review, setReview }) {
-  const list = Object.values(result.decisions)
-    .filter((d) => filter === 'All' || d.outcome === filter)
-    .sort((x, y) => ORDER[x.outcome] - ORDER[y.outcome] || (y.score ?? -1) - (x.score ?? -1) || x.id.localeCompare(y.id, undefined, { numeric: true }));
-
-  if (!list.length) return <p className="section-sub">No applicants with this outcome.</p>;
-
-  return (
-    <div className="list">
-      {list.map((d) => {
-        const open = openId === d.id;
-        const a = d.applicant;
-        const r = review[d.id];
-        return (
-          <article key={d.id} id={`app-${d.id}`} className={`app${flash.includes(d.id) ? ' flash' : ''}`}>
-            <button className="app-row" aria-expanded={open} onClick={() => setOpenId(open ? null : d.id)}>
-              <span className={`tagcell t-${d.outcome}`}>
-                <span className="tag">{OUTCOME_LABEL[d.outcome]}</span>
-              </span>
-              <span className="who">
-                <b>{d.id}</b> {a.name || 'No name'}
-                {d.updatedFields ? <span className="badge-upd">Updated, verify</span> : null}
-                <div className="meta">
-                  {a.city || 'No city'}, {a.pin || 'no pin'}{d.territoryId ? `, ${d.territoryId}` : ''}
-                  {r?.status === 'confirmed' ? `, onboarding: ${r.stage >= PIPELINE.length ? 'ready to open' : PIPELINE[r.stage].toLowerCase()}` : ''}
-                  {r?.status === 'declined' ? ', declined by you' : ''}
+          <div className="two">
+            <div>
+              <h3>{d.outcome === 'Recommended' ? 'Next steps' : 'What they can do to get recommended'}</h3>
+              <ol className="steps">{d.plan.nextSteps.map((s) => <li key={s}>{s}</li>)}</ol>
+            </div>
+            {d.plan.training ? (
+              <div>
+                <h3>How they’ll be prepared</h3>
+                <div className="box dashed training">
+                  <b>{d.plan.training.track}</b>, {d.plan.training.weeks} week{d.plan.training.weeks === 1 ? '' : 's'}, in {d.plan.training.language}
+                  <div className="muted">{d.plan.training.why}</div>
+                  <ul>{d.plan.training.modules.map((m) => <li key={m}>{m}</li>)}</ul>
                 </div>
-                <div className="why">{d.reason}</div>
-              </span>
-              <span className="score num">{d.score ?? '—'}<small>score</small></span>
-            </button>
-            {open ? <Detail d={d} review={review} setReview={setReview} /> : null}
-          </article>
-        );
-      })}
-    </div>
+              </div>
+            ) : null}
+          </div>
+
+          <Review d={d} review={review} setReview={setReview} />
+
+          <div>
+            <h3>Email draft</h3>
+            <Email email={d.plan.email} />
+          </div>
+        </div>
+      ) : null}
+    </dialog>
   );
 }
-
-export { EDITABLE_FIELDS };

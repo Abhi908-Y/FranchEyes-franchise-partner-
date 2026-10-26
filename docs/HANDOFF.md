@@ -9,7 +9,7 @@ Read this before changing anything. It separates three things:
 
 Verified in the build environment:
 - `npm run build` succeeds (Next.js 15.5.28, React 19.1.9).
-- `npm run check` passes all 30 checks against `public/sample-applications.xlsx`.
+- `npm run check` passes all 36 checks against `public/sample-applications.xlsx`.
 - Clicked through in a headless browser at desktop and mobile widths: upload, sample file, territory board, applicant details, confirm and pipeline, email draft, chat (fallback mode).
 - The chat route with a real key via **OpenRouter** (`OPENROUTER_API_KEY`, model `google/gemini-3.7-flash`): all four messages in section 7 give the expected outcomes, through the API and the UI.
 - With no key set, `/api/chat` returns 503 and the chat falls back to `lib/chatLocal.js`; all four messages still work.
@@ -47,11 +47,11 @@ Allowed values (from the case): Karnataka only. Bengaluru 560 Tier 1; Mysuru 570
 - **Code decides, Gemini explains.** Gemini never changes an outcome directly; it only answers from a snapshot or returns field updates, and the engine re-runs.
 - **Chat updates re-run the whole batch** and are flagged "unverified".
 - **Emails are drafts** (Copy / Open in email app), not sent, because there's no contact data and a public send button could be abused.
-- **No database.** State lives in the browser session.
+- **No database.** Each upload is saved as a project (brand name + category) in the browser's localStorage, with its bookmarks, notes, chat and brand rules. Uploading a new sheet creates a new project; earlier ones stay in the sidebar. Data stays in that one browser; clearing site data removes it.
 
 ## 5. Rulebook as implemented (our decision; code in `lib/engine.js`)
 
-Defaults live in `lib/constants.js` (`DEFAULT_PROFILE`) and are editable in the app under "Brand rules".
+Defaults live in `lib/constants.js` (`DEFAULT_PROFILE`) and are editable per project under "Brand rules". **Categories** (`CATEGORIES` in `lib/constants.js`, agreed 26 Oct 2026) set which floors qualify and the minimum / "very large" shop size: walk-in retail (eyewear, apparel, electronics, pharmacy, grocery, food, other) needs ground floor or mall; beauty, gym and education allow any floor (upper scores 12/15). Gym minimum is 2,500 sq ft. Eyewear equals the original defaults exactly; `npm run check` verifies this.
 
 **Reject (hard rules):**
 - Pin code already has an existing store.
@@ -70,6 +70,8 @@ Defaults live in `lib/constants.js` (`DEFAULT_PROFILE`) and are editable in the 
 - Space: Owned 25, Rented 20.
 - Floor: Ground 15, Mall unit 12.
 - Launch: 3 months or less 10; 4–6 months 6; later or blank 3.
+
+**Franchisee readiness score (every applicant, display only; `readinessScore` in `lib/engine.js`):** the same five parts, but a missing or failing part scores 0: investment below the minimum or not given, no shop yet, upper / unknown / blank floor (and no floor points without a shop). Labels: 75+ Ready, 50–74 Nearly ready, under 50 Not ready (`READINESS_BANDS` in `lib/constants.js`). For applicants with no reject or hold it equals the score above, so allocation is unchanged; `npm run check` verifies this. It does not include shop size, so an applicant held for a too-small shop can still show as Ready.
 
 **Allocation, per territory:** sort by score, then investment, then ID. Give slots in order. Skip a pin already given to a higher scorer (→ Waitlist). Require a minimum score by territory priority: High 50, Medium 60, Low 70 (below → Waitlist). When slots run out → Waitlist. Hold and Reject applicants never take slots. If a pin code appears in two territories, the first territory listed is used and a note is shown.
 
