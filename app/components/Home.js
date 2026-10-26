@@ -24,7 +24,7 @@ export default function Home({ reviews, onUpload, onOpen }) {
     <section className="home">
       <div className="home-hero">
         <span className="chip">FranchEyes · internal tool for the expansion team</span>
-        <h1>Welcome. The vision for <mark>better franchisee.</mark></h1>
+        <h1>Welcome. The vision for <mark>better franchisees.</mark></h1>
         <p className="lede">
           Getting from a partner’s first application to an open, trained store is slow and leaky. FranchEyes takes that journey off the
           expansion team’s plate: upload the applications and it reviews every partner, explains each decision, and walks the
