@@ -9,7 +9,7 @@ Read this before changing anything. It separates three things:
 
 Verified in the build environment:
 - `npm run build` succeeds (Next.js 15.5.28, React 19.1.9).
-- `npm run check` passes all 45 checks against `public/sample-applications.xlsx`.
+- `npm run check` passes all 48 checks against `public/sample-applications.xlsx`.
 - Clicked through in a headless browser at desktop and mobile widths: upload, sample file, territory board, applicant details, confirm and pipeline, email draft, chat (fallback mode).
 - The chat route with a real key via **OpenRouter** (`OPENROUTER_API_KEY`, model `google/gemini-3.7-flash`): all four messages in section 7 give the expected outcomes, through the API and the UI.
 - With no key set, `/api/chat` returns 503 and the chat falls back to `lib/chatLocal.js`; all four messages still work.
@@ -68,7 +68,7 @@ Defaults live in `lib/constants.js` (`DEFAULT_PROFILE`) and are editable per pro
 
 **Flags with a question for the applicant (don't change the outcome):** likely duplicates (same name and pin), 0 years' experience while the notes mention years of running a shop, a festival deadline that can't be met (e.g. Diwali, 8 Nov 2026: setup takes about 3 months), plans to keep or leave a job.
 
-**Chat changes the data, never the rules:** applicant fields (not their notes), status, territory slots or priority, and closing an existing store. Restating something already true is reported as "nothing changed". Every update reply gives the verdict, what changed (before → after), who else moved (including promotions), who in the same territory kept their pin, and how many applicants didn't change. Non-approvals are explained with every blocker and a side-by-side comparison with whoever won.
+**Chat changes the data, never the rules:** applicant fields (not their notes), status, territory slots or priority, and closing an existing store. Restating something already true is reported as "nothing changed". Every update reply gives the verdict, what changed (before → after), who else moved (including promotions), who in the same territory kept their pin, and how many applicants didn't change. Non-approvals are explained with typed blockers (rule, investment, existing store, not in any territory, condition, lost pin to APP-X with a factor-by-factor comparison, territory full, below bar). "What does X need" comes from a what-if: the engine applies the fixes a Hold asks for and re-runs the batch, so it can say "even with this fix they would still lose to APP-X"; for anyone who lost, it works out the points needed and whether capital, a ground floor or experience could close the gap. The update diff lists every applicant whose outcome, score, pin, redirect offer or rank changed.
 
 **Warnings (shown, don't change the outcome):** state not Karnataka; 0 years' experience but the business sounds like retail; launch target under 3 months; no space with a launch of 2 months or less; size over 3,000 sq ft; investment written as a range; no language (English assumed).
 

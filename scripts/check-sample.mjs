@@ -74,6 +74,18 @@ const msg = summariseUpdate({ applied: [{ id: 'APP-002', kind: 'applicant', fiel
 check(msg.changes.some((c) => /APP-004: Waitlist → Recommended \(promoted\)/.test(c.text)) && msg.unaffected.some((t) => /other applicants unchanged/.test(t)),
   `The reply names who was promoted and how many didn’t change (${msg.changes.map((c) => c.text.slice(0, 50)).join(' | ')} | ${msg.unaffected.slice(-1)})`);
 
+// The diff reports rank moves too: with APP-002 gone, APP-003 moves from rank 2 to 1 and keeps its slot.
+const rank3 = diffResults(r, rw).find((c) => c.id === 'APP-003');
+check(rank3 && rank3.fromRank === 2 && rank3.toRank === 1, `Withdrawing APP-002 reports APP-003’s rank change (${JSON.stringify(rank3 && [rank3.fromRank, rank3.toRank])})`);
+
+// Typed blockers: APP-012 lost its pin and has an upper-floor condition.
+const types12 = r.decisions['APP-012'].blockers.map((b) => b.type);
+check(types12.includes('lostPin') && types12.includes('condition'), `APP-012’s blockers are typed (${types12.join(', ')})`);
+
+// What-if: fixing a hold re-runs the batch. APP-020’s 260 sq ft shop is the only problem; at 300 sq ft the engine projects the result.
+const wf = r.decisions['APP-020'].ifFixed;
+check(wf?.projectable && /300 sq ft/.test(wf.text) && ['Recommended', 'Conditional', 'Waitlist', 'Redirect'].includes(wf.outcome), `APP-020’s what-if is projected (${wf?.text})`);
+
 // Duplicate: removing APP-003 as a duplicate takes it out of the pool too.
 const rd = run({ 'APP-003': { status: 'duplicate:APP-002' } });
 check(rd.decisions['APP-003'].outcome === 'Withdrawn' && /duplicate of APP-002/.test(rd.decisions['APP-003'].reason), `Marking APP-003 a duplicate removes it (got ${rd.decisions['APP-003'].reason})`);

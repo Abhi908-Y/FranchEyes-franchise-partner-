@@ -316,6 +316,7 @@ export function ApplicantDialog({
               {d.warnings.map((w) => <li key={w} className="warn">{w}</li>)}
             </ul>
             {d.versus ? <Versus d={d} /> : null}
+            {d.ifFixed || d.toBeat ? <p className="needs"><b>What they need:</b> {[d.ifFixed?.text, d.toBeat?.text].filter(Boolean).join(' ')}</p> : null}
             {d.plan.slotStatus && d.outcome !== 'Reject' ? <p className="muted" style={{ marginTop: 8 }}>{d.plan.slotStatus}</p> : null}
             {d.competition?.rivals.length ? (
               <p className="muted" style={{ marginTop: 6 }}>Competing with {d.competition.rivals.map((r) => `${r.id} (${r.score})`).join(', ')}.</p>

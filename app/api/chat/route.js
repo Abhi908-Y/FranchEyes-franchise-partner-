@@ -8,6 +8,7 @@ How you work:
 - Answer only from the snapshot. Quote the specific numbers and rules involved. If something isn't in the snapshot, say so. Refer to applicants by ID and name.
 - Answer format, in this order, as short lines separated by \n: (1) the verdict first, using exactly one of: recommended, approved on a condition, redirected to another pin code, waitlisted, on hold, rejected, withdrawn; e.g. "APP-004 Shruti Hegde: waitlisted." (2) the reason in one sentence. (3) for anything not Recommended, every blocker from ALL BLOCKERS, in order, and if a VS line exists compare side by side with the specific factors (score, capital, experience, space, floor, launch). Never answer with just "lower score". (4) "Next:" the next step from the snapshot. Keep it under about 90 words.
 - For Redirect, name the offered pin and territory. For Conditional, name the condition and the deadline.
+- "What does X need?" or "what if X fixes Y?": answer from WHAT THEY NEED, which the engine projected by re-running the batch. If it says they would still lose, say so plainly: "even with this fix they would still lose to APP-X (a vs b)". Never promise an outcome the snapshot doesn't project.
 - If the snapshot lists questions for the applicant and they're relevant, include the most important one.
 - You can answer questions about the reviewer's bookmarks, notes and scheduled meetings, but you can't add or change them; the reviewer does that in the dashboard (Take next step).
 
@@ -15,7 +16,7 @@ Updates (new information): return an update; the app checks whether anything act
 - Applicant fields: investment (number, lakh), experience (number, years), space ("Owned" | "Rented" | "Not yet identified"), size (number, sq ft), floor ("Ground" | "Upper" | "Mall unit" | "Not known"), launch (number, months), language ("Kannada" | "English" | "Hindi"), pin (6-digit string), city, business.
 - Applicant status (use these instead of editing fields): withdrew / pulled out -> {"id":"APP-020","field":"status","value":"withdrawn"}; duplicate -> {"id":"APP-021","field":"status","value":"duplicate:APP-020"} (the second ID is the one to keep); reinstate / back in -> {"id":"APP-020","field":"status","value":"active"}.
 - Territory: "TER-02 now has 3 slots" -> {"id":"TER-02","field":"slots","value":3}; priority -> {"id":"TER-02","field":"priority","value":"High"}.
-- Existing store: "ST-01 has closed" -> {"id":"ST-01","field":"closed","value":true}.
+- Existing store: "ST-01 has closed" -> {"id":"ST-01","field":"closed","value":true}; "ST-01 has reopened" -> value false.
 - Never update the applicant's notes: they're the original record. Never invent a value the user didn't give.
 - If an applicant whose space is "Not yet identified" has now found a space, also set space to "Rented" (or "Owned" if they bought or own it). To clear a value the user says is wrong, set "value" to null.
 - If the user states something that's already true in the snapshot, still return the update; the app will say nothing changed.
@@ -94,7 +95,16 @@ export async function POST(req) {
       return Response.json({ error: `gemini_${status}` }, { status: 502 });
     }
     const clean = raw.replace(/```json|```/g, '').trim();
-    const parsed = JSON.parse(clean);
+    let parsed = null;
+    try {
+      parsed = JSON.parse(clean);
+    } catch {
+      // Sometimes the model wraps the JSON in text, or answers in plain text. A JSON object inside is used as is;
+      // plain text can only ever be an answer (never a data update), so it's passed on as one.
+      const inner = clean.match(/\{[\s\S]*\}/);
+      try { parsed = inner ? JSON.parse(inner[0]) : null; } catch {}
+      if (!parsed && clean) parsed = { type: 'answer', text: clean.slice(0, 2000) };
+    }
     if (!parsed || !['answer', 'update', 'clarify'].includes(parsed.type)) throw new Error('shape');
     return Response.json(parsed);
   } catch (e) {
