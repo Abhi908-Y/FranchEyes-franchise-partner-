@@ -1,0 +1,17 @@
+{
+  "name": "pin-drop-franchise-desk",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "check": "node scripts/check-sample.mjs"
+  },
+  "dependencies": {
+    "next": "15.5.28",
+    "react": "19.1.9",
+    "react-dom": "19.1.9",
+    "xlsx": "0.18.5"
+  }
+}
