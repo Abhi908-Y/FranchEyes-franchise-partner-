@@ -13,11 +13,11 @@ Verified in the build environment:
 - Clicked through in a headless browser at desktop and mobile widths: upload, sample file, territory board, applicant details, confirm and pipeline, email draft, chat (fallback mode).
 - The chat route with a real key via **OpenRouter** (`OPENROUTER_API_KEY`, model `google/gemini-3.7-flash`): all four messages in section 7 give the expected outcomes, through the API and the UI.
 - With no key set, `/api/chat` returns 503 and the chat falls back to `lib/chatLocal.js`; all four messages still work.
+- Deployed on Vercel at https://franchise-partner-desk-topaz.vercel.app (public, no login). Pushes to `main` on GitHub deploy automatically. Sample file, chat updates and Google Fonts all checked on the live site.
 
 **Not yet verified. Do these first:**
 1. **The direct Google path** (`GEMINI_API_KEY`) hasn't run with a real key. Its default model `gemini-2.5-flash` is probably retired; set `GEMINI_MODEL` to a current one if you use this path. If both keys are set, OpenRouter is used.
-2. **Deployment to Vercel** hasn't been done yet.
-3. **Google Fonts** (Schibsted Grotesk, Public Sans) couldn't load in the build sandbox. Fallback fonts are set, so the page works either way; check it looks right once deployed.
+2. **The AI chat on the live site** needs `OPENROUTER_API_KEY` set in Vercel (Settings → Environment Variables). Without it, the live chat uses the built-in fallback.
 
 ## 2. What the case asks (from the case)
 
