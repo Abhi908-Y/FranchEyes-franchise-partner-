@@ -9,7 +9,7 @@ Read this before changing anything. It separates three things:
 
 Verified in the build environment:
 - `npm run build` succeeds (Next.js 15.5.28, React 19.1.9).
-- `npm run check` passes all 36 checks against `public/sample-applications.xlsx`.
+- `npm run check` passes all 45 checks against `public/sample-applications.xlsx`.
 - Clicked through in a headless browser at desktop and mobile widths: upload, sample file, territory board, applicant details, confirm and pipeline, email draft, chat (fallback mode).
 - The chat route with a real key via **OpenRouter** (`OPENROUTER_API_KEY`, model `google/gemini-3.7-flash`): all four messages in section 7 give the expected outcomes, through the API and the UI.
 - With no key set, `/api/chat` returns 503 and the chat falls back to `lib/chatLocal.js`; all four messages still work.
@@ -43,22 +43,32 @@ Allowed values (from the case): Karnataka only. Bengaluru 560 Tier 1; Mysuru 570
 ## 4. Our decisions (not stated in the case)
 
 - **Business type:** a walk-in, small-format specialty retail store (Lenskart-style). Basis: the case says "retail brand" and "trained store", the template has Floor and Retail experience columns, and the judges' example update is about a ground-floor space.
-- **Outcomes:** Recommended, Waitlist, Hold, Reject. All are recommendations; one expansion team member reviews them.
+- **Outcomes:** Recommended, Conditional, Redirect, Waitlist, Hold, Reject, Withdrawn (agreed 26 Oct 2026). All are recommendations; one expansion team member reviews them.
 - **Code decides, Gemini explains.** Gemini never changes an outcome directly; it only answers from a snapshot or returns field updates, and the engine re-runs.
 - **Chat updates re-run the whole batch** and are flagged "unverified".
 - **Emails are drafts** (Copy / Open in email app), not sent, because there's no contact data and a public send button could be abused.
-- **No database.** Each upload is saved as a project (brand name + category) in the browser's localStorage, with its bookmarks, notes, chat and brand rules. Uploading a new sheet creates a new project; earlier ones stay in the sidebar. Data stays in that one browser; clearing site data removes it.
+- **No database.** Each upload is saved as a review in the browser's localStorage, with its bookmarks, notes, scheduled next steps, agreement drafts, chat and brand rules. Uploading a new sheet creates a new project; earlier ones stay in the sidebar. Data stays in that one browser; clearing site data removes it.
 
 ## 5. Rulebook as implemented (our decision; code in `lib/engine.js`)
 
-Defaults live in `lib/constants.js` (`DEFAULT_PROFILE`) and are editable per project under "Brand rules". **Categories** (`CATEGORIES` in `lib/constants.js`, agreed 26 Oct 2026) set which floors qualify and the minimum / "very large" shop size: walk-in retail (eyewear, apparel, electronics, pharmacy, grocery, food, other) needs ground floor or mall; beauty, gym and education allow any floor (upper scores 12/15). Gym minimum is 2,500 sq ft. Eyewear equals the original defaults exactly; `npm run check` verifies this.
+Defaults live in `lib/constants.js` (`DEFAULT_PROFILE`) and are editable per project under "Brand rules". Built for one brand (name not disclosed), so there is no category picker; "Upper floors qualify" and the size range are toggles under Brand rules.
 
 **Reject (hard rules):**
 - Pin code already has an existing store.
 - Pin code isn't in any territory.
 - Investment more than 25% below the tier minimum.
 
-**Hold (fixable):** missing name, city, pin, investment, experience or space status; city not in scope; pin not 6 digits; city and pin prefix disagree; investment up to 25% short; space "Not yet identified"; "Not yet identified" but a size or floor given; owned/rented with no size; size under 300 sq ft; floor Upper, Not known or blank; notes mention an upper floor while the form says otherwise; notes say they're still looking while the form says owned/rented. (The two notes checks are skipped once that field has been updated in chat.)
+**Hold (fixable):** missing name, city, pin, investment, experience or space status; city not in scope; pin not 6 digits; city and pin prefix disagree; investment up to 25% short; space "Not yet identified"; "Not yet identified" but a size or floor given; owned/rented with no size; size under 300 sq ft; floor Not known or blank; notes mention an upper floor while the form says otherwise; notes say they're still looking while the form says owned/rented. (The two notes checks are skipped once that field has been updated in chat.)
+
+**Conditional:** won a slot, approved once a condition is met. An upper-floor shop (when upper floors aren't allowed) competes with 0/15 floor points and, if it wins, must move to a ground-floor or mall unit within 30 days. A winner whose approval rests on a fact only reported in chat must have it verified within 7 days.
+
+**Redirect:** would qualify (no hold, score clears the bar) but the pin is taken, has an existing store, or is outside every territory. Offered a free pin in the same territory first, then another territory in the same city with a slot left and a bar they clear. Offers don't take a slot until the applicant confirms a space; if there's nothing to offer, the outcome stays Reject or Waitlist and the reason says so.
+
+**Withdrawn:** set in chat ("APP-020 has withdrawn", "APP-021 is a duplicate of APP-020"); undone with "reinstate". The slot is released and the next in line moves up.
+
+**Flags with a question for the applicant (don't change the outcome):** likely duplicates (same name and pin), 0 years' experience while the notes mention years of running a shop, a festival deadline that can't be met (e.g. Diwali, 8 Nov 2026: setup takes about 3 months), plans to keep or leave a job.
+
+**Chat changes the data, never the rules:** applicant fields (not their notes), status, territory slots or priority, and closing an existing store. Restating something already true is reported as "nothing changed". Every update reply gives the verdict, what changed (before → after), who else moved (including promotions), who in the same territory kept their pin, and how many applicants didn't change. Non-approvals are explained with every blocker and a side-by-side comparison with whoever won.
 
 **Warnings (shown, don't change the outcome):** state not Karnataka; 0 years' experience but the business sounds like retail; launch target under 3 months; no space with a launch of 2 months or less; size over 3,000 sq ft; investment written as a range; no language (English assumed).
 
@@ -76,6 +86,8 @@ Defaults live in `lib/constants.js` (`DEFAULT_PROFILE`) and are editable per pro
 **Allocation, per territory:** sort by score, then investment, then ID. Give slots in order. Skip a pin already given to a higher scorer (→ Waitlist). Require a minimum score by territory priority: High 50, Medium 60, Low 70 (below → Waitlist). When slots run out → Waitlist. Hold and Reject applicants never take slots. If a pin code appears in two territories, the first territory listed is used and a note is shown.
 
 **Training plans (our decision; `lib/plan.js`):** under 3 years' experience, full 3-week programme; 3–5 years, 2 weeks; 6+ years, 1-week fast track. In the preferred language (English if blank). Shadow shifts at an existing store in the same city; Tumakuru shadows Bengaluru, Davanagere shadows Hubballi-Dharwad.
+
+**Take next step (recommended partners, our decision):** schedule a site visit, call or agreement signing (saved, with a downloadable .ics calendar invite), the next-step email, and a draft franchise agreement (`lib/agreement.js`): a generic template written for this tool, prefilled from the application, with unknowns (franchisor legal name, addresses, PAN, fee, deposit, royalty, marketing %) left as highlighted blanks. Exports to Word (.doc) or print / PDF. Not legal advice.
 
 ## 6. Files
 
@@ -95,8 +107,8 @@ Defaults live in `lib/constants.js` (`DEFAULT_PROFILE`) and are editable per pro
 2. `npm run build`.
 3. `npm run dev`, click "Try the sample file", then in the chat:
    - "Why is APP-007 on hold?" → no shop space yet.
-   - "APP-012 has now found a ground-floor space" → APP-012 Hold → Recommended; APP-013 Recommended → Waitlist (pin 572101).
-   - "APP-008 can now invest 31 lakh" → APP-008 should leave Hold.
+   - "APP-012 has now found a ground-floor space" → APP-012 Redirect → Conditional (verify the floor within 7 days); APP-013 Recommended → Redirect (pin 572101).
+   - "APP-008 can now invest 31 lakh" → APP-008 Hold → Conditional (verify funds).
    - "Which territories still have open slots?"
 4. Repeat step 3 with `OPENROUTER_API_KEY` (or `GEMINI_API_KEY`) set, to test the real Gemini route.
 5. Upload the blank template (`docs/Case1_Franchise_Test_Data_Format.xlsx`): it should show a clear "no rows" message, not crash.

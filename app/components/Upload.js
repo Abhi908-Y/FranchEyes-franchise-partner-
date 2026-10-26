@@ -1,13 +1,6 @@
 'use client';
 
 import { useRef, useState } from 'react';
-import { CATEGORIES } from '../../lib/constants';
-
-export function categoryLabel(profile) {
-  const c = CATEGORIES.find((x) => x.id === profile.category);
-  return profile.categoryName || (c ? c.label : 'Other');
-}
-
 function Rules({ profile, setProfile }) {
   const setMin = (tier, v) => setProfile({ ...profile, minInvestment: { ...profile.minInvestment, [tier]: Number(v) || 0 } });
   const setBar = (p, v) => setProfile({ ...profile, minScore: { ...profile.minScore, [p]: Number(v) || 0 } });
@@ -15,14 +8,13 @@ function Rules({ profile, setProfile }) {
   return (
     <div className="rules-body">
       <p className="rules-note">
-        Category: <b>{categoryLabel(profile)}</b>.{' '}
         {profile.upperFloorOk
-          ? 'Any floor qualifies here (ground, upper or mall), because customers come on purpose rather than walking in off the street.'
+          ? 'Upper floors are allowed, so any floor qualifies (ground, upper or mall).'
           : 'This is walk-in retail: customers walk in, so the shop needs street-level or mall footfall. Upper floors go on hold.'}
         {' '}Change any number and every decision updates.
       </p>
       <div className="rules-grid">
-        <label className="field">Brand name
+        <label className="field">Brand name (used in emails and agreements)
           <input value={profile.brandName} onChange={(e) => setProfile({ ...profile, brandName: e.target.value })} />
         </label>
         {['Tier 1', 'Tier 2', 'Tier 3'].map((t) => (
@@ -57,82 +49,48 @@ function Rules({ profile, setProfile }) {
   );
 }
 
-// New project: brand name and category first, then the sheet. Each upload becomes its own saved project.
-export default function Upload({ onCreate, error, firstTime }) {
+// Upload screen. Each upload is saved as its own review in the sidebar, so earlier ones are never lost.
+export default function Upload({ onCreate, error }) {
   const input = useRef(null);
-  const [brand, setBrand] = useState('');
-  const [category, setCategory] = useState('');
-  const [otherName, setOtherName] = useState('');
   const [over, setOver] = useState(false);
   const [busy, setBusy] = useState(false);
-  const ready = brand.trim() && category && (category !== 'other' || otherName.trim());
-  const meta = () => ({ brand: brand.trim(), category, categoryName: category === 'other' ? otherName.trim() : '' });
 
   async function handle(file) {
-    if (!file || !ready) return;
+    if (!file) return;
     setBusy(true);
-    await onCreate(file, meta());
+    await onCreate(file);
     setBusy(false);
   }
 
   async function sample() {
-    if (!ready) return;
     setBusy(true);
     const r = await fetch('/sample-applications.xlsx');
     const blob = await r.blob();
-    await onCreate(new File([blob], 'sample-applications.xlsx'), meta());
+    await onCreate(new File([blob], 'sample-applications.xlsx'));
     setBusy(false);
   }
 
   return (
     <section className="hero">
-      <h2>Start a <mark>new review.</mark></h2>
+      <h2>Upload the <mark>application sheet.</mark></h2>
       <p className="lede">
-        Tell us whose franchise requests these are, then upload the sheet. Each upload is saved as its own project in the sidebar, so earlier reviews are never lost.
+        Drop in this round’s franchise applications. Every applicant gets an outcome, the reason, a franchisee readiness score and next steps,
+        with never two stores in one pin code. Each upload is saved as its own review, so earlier ones stay in the sidebar.
       </p>
 
-      <div className="sk new-form">
-        <label className="field">1. Brand name (the franchisor)
-          <input value={brand} onChange={(e) => setBrand(e.target.value)} placeholder="e.g. Lenskart" autoFocus={!firstTime} />
-        </label>
-        <label className="field">2. Category
-          <select value={category} onChange={(e) => setCategory(e.target.value)}>
-            <option value="" disabled>Choose a category</option>
-            {CATEGORIES.map((c) => (
-              <option key={c.id} value={c.id}>{c.label}{c.example ? ` (e.g. ${c.example})` : ''}</option>
-            ))}
-          </select>
-        </label>
-        {category === 'other' ? (
-          <label className="field">Your category
-            <input value={otherName} onChange={(e) => setOtherName(e.target.value)} placeholder="e.g. Pet care" />
-          </label>
-        ) : null}
-        {category ? (
-          <p className="rules-note">
-            {CATEGORIES.find((c) => c.id === category).upperFloorOk
-              ? `Any floor qualifies for this category. Minimum space ${CATEGORIES.find((c) => c.id === category).minSize.toLocaleString('en-IN')} sq ft.`
-              : `Ground-floor or mall spaces only, since customers walk in. Minimum space ${CATEGORIES.find((c) => c.id === category).minSize.toLocaleString('en-IN')} sq ft.`}
-            {' '}You can change these under Brand rules later.
-          </p>
-        ) : null}
-      </div>
-
       <div
-        className={`drop sk${over ? ' over' : ''}${ready ? '' : ' locked'}`}
+        className={`drop sk${over ? ' over' : ''}`}
         onDragOver={(e) => { e.preventDefault(); setOver(true); }}
         onDragLeave={() => setOver(false)}
         onDrop={(e) => { e.preventDefault(); setOver(false); handle(e.dataTransfer.files?.[0]); }}
       >
-        <strong>3. Upload the applicant sheet</strong>
+        <strong>Drag the Excel file here</strong>
         <div className="row-btns">
-          <button className="btn" onClick={() => input.current?.click()} disabled={busy || !ready}>{busy ? 'Reading…' : 'Choose file'}</button>
-          <button className="btn ghost" onClick={sample} disabled={busy || !ready}>Use the sample file</button>
+          <button className="btn" onClick={() => input.current?.click()} disabled={busy}>{busy ? 'Reading…' : 'Choose file'}</button>
+          <button className="btn ghost" onClick={sample} disabled={busy}>Try the sample file</button>
           <a className="btn quiet" href="/sample-applications.xlsx" download>Download the template</a>
         </div>
-        <p className="hint">
-          {ready ? 'Drag the .xlsx here or choose it. It needs the Applications and Territories sheets, like the template. The file is read in your browser.' : 'Fill in the brand name and category first.'}
-        </p>
+        <p className="hint">.xlsx in the template format: Applications and Territories sheets (Existing stores is already filled in). The file is read in your browser.</p>
         <input ref={input} type="file" accept=".xlsx,.xls" hidden onChange={(e) => { handle(e.target.files?.[0]); e.target.value = ''; }} />
       </div>
       {error ? <div className="err" role="alert">{error}</div> : null}

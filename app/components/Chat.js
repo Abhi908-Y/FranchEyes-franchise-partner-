@@ -2,17 +2,14 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { buildSnapshot } from '../../lib/snapshot';
-import { localAnswer, validUpdates, explain } from '../../lib/chatLocal';
-import { EDITABLE_FIELDS } from '../../lib/constants';
-
-const LABEL = { Recommended: 'Recommended', Waitlist: 'Waitlist', Hold: 'On hold', Reject: 'Rejected' };
+import { localAnswer, validUpdates, noChangeReply, summariseUpdate } from '../../lib/chatLocal';
 
 function suggestions(result) {
   if (!result) return [];
   const ds = Object.values(result.decisions);
   const hold = ds.find((d) => d.outcome === 'Hold');
   const wait = ds.find((d) => d.outcome === 'Waitlist');
-  const upper = ds.find((d) => d.outcome === 'Hold' && d.issues.some((h) => /upper floor/i.test(h.issue)));
+  const upper = ds.find((d) => ['Conditional', 'Redirect', 'Waitlist', 'Hold'].includes(d.outcome) && d.applicant.floor === 'Upper');
   const out = [];
   if (hold) out.push(`Why is ${hold.id} on hold?`);
   if (wait) out.push(`Why didn’t ${wait.id} get a slot?`);
@@ -29,7 +26,7 @@ function Linkify({ text, onApplicant, ids }) {
   );
 }
 
-export default function Chat({ result, profile, personal, messages, setMessages, applyUpdates, onApplicant }) {
+export default function Chat({ result, profile, personal, lookup, messages, setMessages, applyUpdates, onApplicant }) {
   const [text, setText] = useState('');
   const [busy, setBusy] = useState(false);
   const [offline, setOffline] = useState(false);
@@ -64,24 +61,17 @@ export default function Chat({ result, profile, personal, messages, setMessages,
     try {
       const reply = await ask(m);
       if (reply.type === 'update') {
-        const valid = validUpdates(reply.updates, result.decisions, EDITABLE_FIELDS);
+        const valid = validUpdates(reply.updates, lookup);
+        const real = valid.filter((u) => !u.same);
+        const same = valid.filter((u) => u.same);
         if (!valid.length) {
-          setMessages((x) => [...x, { role: 'bot', text: 'I couldn’t match that to an applicant and a field. Try “APP-012 has found a ground-floor space” or “APP-008 can now invest 31 lakh”.' }]);
+          setMessages((x) => [...x, { role: 'bot', text: 'I couldn’t match that to an applicant, territory or store. Try “APP-012 has found a ground-floor space”, “APP-020 has withdrawn” or “TER-05 now has 3 slots”.' }]);
+        } else if (!real.length) {
+          // Nothing to change: say so, and point at what's really in the way.
+          setMessages((x) => [...x, noChangeReply(same, result)]);
         } else {
-          const { changes, newResult } = applyUpdates(valid);
-          const fieldLines = valid.map((u) => `${u.id}: ${EDITABLE_FIELDS[u.field].toLowerCase()} → ${u.value ?? 'blank'}`);
-          const lines = changes.length
-            ? changes.map((c) => ({
-                id: c.id,
-                text: `${c.id}: ${LABEL[c.from]} → ${LABEL[c.to]}${c.toScore !== null && c.toScore !== c.fromScore ? ` (score ${c.toScore})` : ''}. ${c.reason}`,
-              }))
-            : [...new Set(valid.map((u) => u.id))].map((id) => ({ id, text: `No change in outcome. ${explain(newResult.decisions[id])}` }));
-          setMessages((x) => [...x, {
-            role: 'bot',
-            text: `Updated ${fieldLines.join('; ')}. I re-ran every decision in the batch.`,
-            changes: lines,
-            verify: true,
-          }]);
+          const { changes, newResult } = applyUpdates(real);
+          setMessages((x) => [...x, summariseUpdate({ applied: real, same, changes, prev: result, next: newResult })]);
         }
       } else {
         setMessages((x) => [...x, { role: 'bot', text: reply.text || 'I don’t have an answer for that.' }]);
@@ -110,12 +100,18 @@ export default function Chat({ result, profile, personal, messages, setMessages,
         {messages.map((m, i) => (
           <div key={i} className={`msg ${m.role === 'user' ? 'user' : 'bot'}`}>
             {m.role === 'user' ? m.text : <Linkify text={m.text} onApplicant={onApplicant} ids={ids} />}
-            {m.changes ? (
-              <ul className="chg">
-                {m.changes.map((c, j) => <li key={j}><Linkify text={c.text} onApplicant={onApplicant} ids={ids} /></li>)}
-              </ul>
+            {m.detail?.length ? <div className="detail-lines">{m.detail.map((t, j) => <div key={j}><Linkify text={t} onApplicant={onApplicant} ids={ids} /></div>)}</div> : null}
+            {m.changes?.length ? (
+              <>
+                <div className="chg-title">Also affected</div>
+                <ul className="chg">
+                  {m.changes.map((c, j) => <li key={j}><Linkify text={c.text} onApplicant={onApplicant} ids={ids} /></li>)}
+                </ul>
+              </>
             ) : null}
-            {m.verify ? <div className="verify">Reported by the applicant. Verify before you confirm.</div> : null}
+            {m.unaffected?.length ? <div className="unaffected">{m.unaffected.map((t, j) => <div key={j}><Linkify text={t} onApplicant={onApplicant} ids={ids} /></div>)}</div> : null}
+            {m.verify ? <div className="verify">Reported in chat, not yet verified. Anything approved on it is Conditional until checked.</div> : null}
+            {m.footer ? <div className="msg-foot">{m.footer}</div> : null}
           </div>
         ))}
         {busy ? <div className="typing">Checking…</div> : null}

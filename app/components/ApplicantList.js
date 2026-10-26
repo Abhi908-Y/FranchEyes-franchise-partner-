@@ -1,10 +1,11 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import { PIPELINE } from '../../lib/constants';
+import { PIPELINE, NEXT_STEP_TYPES } from '../../lib/constants';
+import NextSteps from './NextSteps';
+import { OUTCOME_LABEL } from '../../lib/chatLocal';
 
-const ORDER = { Recommended: 0, Waitlist: 1, Hold: 2, Reject: 3 };
-const OUTCOME_LABEL = { Recommended: 'Recommended', Waitlist: 'Waitlist', Hold: 'On hold', Reject: 'Rejected' };
+const ORDER = { Recommended: 0, Conditional: 1, Redirect: 2, Waitlist: 3, Hold: 4, Reject: 5, Withdrawn: 6 };
 const TONE = { Ready: 'ok', 'Nearly ready': 'warn', 'Not ready': 'hot' };
 const MAX = { investment: 30, experience: 20, space: 25, floor: 15, launch: 10 };
 const PART_LABEL = { investment: 'Investment', experience: 'Experience', space: 'Space', floor: 'Floor', launch: 'Launch timing' };
@@ -28,7 +29,13 @@ function Segs({ r }) {
   );
 }
 
-export default function ApplicantList({ list, onOpen, flash, review, bookmarks, notes, onToggleBookmark, emptyText }) {
+// The soonest upcoming scheduled step for a candidate, if any.
+export function nextScheduled(items = []) {
+  const now = Date.now();
+  return [...items].filter((x) => new Date(x.when).getTime() >= now).sort((x, y) => new Date(x.when) - new Date(y.when))[0] || null;
+}
+
+export default function ApplicantList({ list, onOpen, flash, review, bookmarks, notes, schedules = {}, onToggleBookmark, emptyText }) {
   if (!list.length) return <p className="empty">{emptyText || 'No applicants match this view.'}</p>;
   return (
     <ul className="list">
@@ -56,6 +63,14 @@ export default function ApplicantList({ list, onOpen, flash, review, bookmarks, 
                   {d.updatedFields ? <span className="chip upd">Updated, verify</span> : null}
                   {r?.status === 'confirmed' ? <span className="chip o-Recommended">Onboarding: {r.stage >= PIPELINE.length ? 'ready to open' : PIPELINE[r.stage].toLowerCase()}</span> : null}
                   {r?.status === 'declined' ? <span className="chip o-Reject">Declined by you</span> : null}
+                  {(() => {
+                    const n = nextScheduled(schedules[d.id]);
+                    return n ? (
+                      <span className="chip upd">
+                        {NEXT_STEP_TYPES[n.type].icon} {NEXT_STEP_TYPES[n.type].label} {new Date(n.when).toLocaleString('en-IN', { day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit' })}
+                      </span>
+                    ) : null;
+                  })()}
                 </span>
                 <span className="one">{d.reason}</span>
                 <span className="meta-line">{a.city || 'No city'}, {a.pin || 'no pin'}{d.territoryId ? ` · ${d.territoryId}` : ' · no territory'}</span>
@@ -149,7 +164,7 @@ function Email({ email }) {
 
 function Review({ d, review, setReview }) {
   const r = review[d.id];
-  if (d.outcome !== 'Recommended') return null;
+  if (d.outcome !== 'Recommended' && d.outcome !== 'Conditional') return null;
   if (!r) {
     return (
       <div>
@@ -192,6 +207,27 @@ function Review({ d, review, setReview }) {
   );
 }
 
+// Side by side with whoever won the pin or the last slot: the factors behind the scores, not just "lower score".
+function Versus({ d }) {
+  const v = d.versus;
+  const a = d.applicant;
+  const rows = [
+    ['Score', d.score, v.score],
+    ['Capital', a.investment === null ? '—' : `₹${a.investment}L`, v.investment === null ? '—' : `₹${v.investment}L`],
+    ['Experience', a.experience === null ? '—' : `${a.experience} yrs`, v.experience === null ? '—' : `${v.experience} yrs`],
+    ['Space', `${show(a.space)}${a.size ? `, ${a.size} sq ft` : ''}`, `${show(v.space)}${v.size ? `, ${v.size} sq ft` : ''}`],
+    ['Floor', show(a.floor), show(v.floor)],
+    ['Launch', a.launch === null ? '—' : `${a.launch} mo`, v.launch === null ? '—' : `${v.launch} mo`],
+  ];
+  return (
+    <table className="versus">
+      <caption>{d.id} vs {v.id}, who {v.why}</caption>
+      <thead><tr><th scope="col"></th><th scope="col">{d.id}</th><th scope="col">{v.id}</th></tr></thead>
+      <tbody>{rows.map(([k, x, y]) => <tr key={k}><th scope="row">{k}</th><td>{x}</td><td>{y}</td></tr>)}</tbody>
+    </table>
+  );
+}
+
 // The reviewer's own note. Saved as they type; the list and the chat can see it.
 function NoteBox({ id, note, onNote }) {
   const [text, setText] = useState(note);
@@ -212,7 +248,10 @@ function NoteBox({ id, note, onNote }) {
   );
 }
 
-export function ApplicantDialog({ d, onClose, review, setReview, bookmarked, onToggleBookmark, note, onNote }) {
+export function ApplicantDialog({
+  d, onClose, review, setReview, bookmarked, onToggleBookmark, note, onNote,
+  profile, schedule, onAddSchedule, onRemoveSchedule, agreement, onAgreement,
+}) {
   const ref = useRef(null);
   useEffect(() => {
     const el = ref.current;
@@ -264,21 +303,37 @@ export function ApplicantDialog({ d, onClose, review, setReview, bookmarked, onT
           </div>
 
           <div className={`box t-${d.outcome}`}>
-            <h3>Why {OUTCOME_LABEL[d.outcome].toLowerCase()}</h3>
+            <h3>{d.outcome === 'Recommended' ? 'Why recommended' : d.outcome === 'Withdrawn' ? 'Withdrawn' : `Why ${OUTCOME_LABEL[d.outcome].toLowerCase()}: every blocker`}</h3>
             <ul className="issues">
-              {d.outcome === 'Reject' && d.rejectReasons.map((r) => <li key={r} className="bad">{r}</li>)}
-              {d.outcome === 'Hold' && d.issues.map((h) => (
+              {['Recommended', 'Conditional', 'Redirect', 'Waitlist', 'Withdrawn'].includes(d.outcome) && <li>{d.reason}</li>}
+              {d.outcome !== 'Redirect' && d.rejectReasons.map((r) => <li key={r} className="bad">{r}</li>)}
+              {d.issues.map((h) => (
                 <li key={h.issue}>{h.issue}<span className="fix">Fix: {h.fix}</span></li>
               ))}
-              {(d.outcome === 'Recommended' || d.outcome === 'Waitlist') && <li>{d.reason}</li>}
-              {d.outcome === 'Reject' && d.issues.length ? <li>Also missing: {d.issues.map((h) => h.fix).join(' ')}</li> : null}
+              {(d.conditions || []).map((c) => (
+                <li key={c.issue} className="warn">{c.issue}<span className="fix">Condition: {c.fix}</span></li>
+              ))}
               {d.warnings.map((w) => <li key={w} className="warn">{w}</li>)}
             </ul>
+            {d.versus ? <Versus d={d} /> : null}
             {d.plan.slotStatus && d.outcome !== 'Reject' ? <p className="muted" style={{ marginTop: 8 }}>{d.plan.slotStatus}</p> : null}
             {d.competition?.rivals.length ? (
               <p className="muted" style={{ marginTop: 6 }}>Competing with {d.competition.rivals.map((r) => `${r.id} (${r.score})`).join(', ')}.</p>
             ) : null}
           </div>
+
+          {d.outcome === 'Recommended' || d.outcome === 'Conditional' ? (
+            <NextSteps
+              d={d}
+              profile={profile}
+              schedule={schedule}
+              onAdd={(item) => onAddSchedule(d.id, item)}
+              onRemove={(itemId) => onRemoveSchedule(d.id, itemId)}
+              agreement={agreement}
+              onAgreement={(v) => onAgreement(d.id, v)}
+              emailPane={<Email email={d.plan.email} />}
+            />
+          ) : null}
 
           <div className="two">
             <div>
@@ -291,11 +346,18 @@ export function ApplicantDialog({ d, onClose, review, setReview, bookmarked, onT
             </div>
           </div>
 
+          {d.questions?.length && d.outcome !== 'Recommended' && d.outcome !== 'Withdrawn' ? (
+            <div>
+              <h3>Questions to ask the applicant</h3>
+              <ol className="steps">{d.questions.map((q) => <li key={q}>{q}</li>)}</ol>
+            </div>
+          ) : null}
+
           <NoteBox id={d.id} note={note} onNote={onNote} />
 
           <div className="two">
             <div>
-              <h3>{d.outcome === 'Recommended' ? 'Next steps' : 'What they can do to get recommended'}</h3>
+              <h3>{d.outcome === 'Recommended' || d.outcome === 'Withdrawn' ? 'Next steps' : 'What they can do to get recommended'}</h3>
               <ol className="steps">{d.plan.nextSteps.map((s) => <li key={s}>{s}</li>)}</ol>
             </div>
             {d.plan.training ? (
@@ -312,10 +374,12 @@ export function ApplicantDialog({ d, onClose, review, setReview, bookmarked, onT
 
           <Review d={d} review={review} setReview={setReview} />
 
-          <div>
-            <h3>Email draft</h3>
-            <Email email={d.plan.email} />
-          </div>
+          {d.outcome !== 'Recommended' && d.outcome !== 'Conditional' ? (
+            <div>
+              <h3>Email draft</h3>
+              <Email email={d.plan.email} />
+            </div>
+          ) : null}
         </div>
       ) : null}
     </dialog>

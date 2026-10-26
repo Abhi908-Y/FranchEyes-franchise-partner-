@@ -65,12 +65,15 @@ export default function Rubric({ open, onClose, profile }) {
           <div className="box dashed">
             <h3>How outcomes are decided</h3>
             <ul className="issues">
-              <li className="bad">Reject: the pin code already has a store, isn’t in any territory, or investment is more than {profile.rejectShortfall}% below the minimum.</li>
-              <li className="warn">On hold: something fixable, such as missing details, no shop yet, {profile.upperFloorOk ? 'an unknown floor' : 'an upper or unknown floor'}, a shop under {profile.minSize} sq ft, or a small investment shortfall.</li>
+              <li className="bad">Reject: investment more than {profile.rejectShortfall}% below the minimum, or a location problem (pin already has a store, or isn’t in any territory) with no free pin to offer instead.</li>
+              <li className="warn">On hold: something fixable, such as missing details, no shop yet, an unknown floor, a shop under {profile.minSize} sq ft, a small investment shortfall, or details that contradict each other.</li>
               <li>Everyone else is ranked by readiness inside their territory. Slots go to the highest scores, one store per pin code, if they reach the territory’s bar: high priority {profile.minScore.High}+, medium {profile.minScore.Medium}+, low {profile.minScore.Low}+. The rest are waitlisted.</li>
+              <li>Conditional: won a slot, approved once a condition is met. {profile.upperFloorOk ? '' : 'An upper-floor shop competes with 0 floor points and, if it wins, must move to a ground-floor or mall unit within 30 days. '}Anything approved on a fact only reported in chat must be verified within 7 days.</li>
+              <li>Redirect: would qualify, but the pin is taken, has a store or is outside every territory. They’re offered a free pin in the same territory first, then another territory in the same city.</li>
+              <li>Withdrawn: taken out of the pool in chat (pulled out, or a duplicate). Their slot is released and the next in line moves up.</li>
             </ul>
             <p className="muted" style={{ marginTop: 8 }}>
-              Readiness is shown for everyone, but only applicants with no reject or hold reason compete for slots. Change the numbers under Brand rules.
+              Readiness is shown for everyone, but only applicants with no reject or hold reason compete for slots. Minimum investment: Tier 1 ₹{profile.minInvestment['Tier 1']}L, Tier 2 ₹{profile.minInvestment['Tier 2']}L, Tier 3 ₹{profile.minInvestment['Tier 3']}L. Change the numbers under Brand rules.
             </p>
           </div>
         </div>

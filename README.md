@@ -58,7 +58,7 @@ Minimum investment: Tier 1 ₹30 lakh, Tier 2 ₹22 lakh, Tier 3 ₹18 lakh. All
 ## Check it
 
 ```bash
-npm run check   # 36 checks against the sample file
+npm run check   # 45 checks against the sample file
 ```
 
 ## Files

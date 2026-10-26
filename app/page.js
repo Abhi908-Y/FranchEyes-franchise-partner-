@@ -1,35 +1,31 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
+import { makeLookup, applyOverrides } from '../lib/chatLocal';
 import { parseWorkbook } from '../lib/parse';
 import { runEngine, diffResults } from '../lib/engine';
-import { OUTCOMES, profileFor } from '../lib/constants';
+import { OUTCOMES, DEFAULT_PROFILE } from '../lib/constants';
 import Home from './components/Home';
-import Upload, { categoryLabel } from './components/Upload';
+import Upload from './components/Upload';
 import TerritoryBoard from './components/TerritoryBoard';
-import ApplicantList, { ApplicantDialog, sortDecisions } from './components/ApplicantList';
+import ApplicantList, { ApplicantDialog, sortDecisions, nextScheduled } from './components/ApplicantList';
 import Rubric from './components/Rubric';
 import Chat from './components/Chat';
 
-const OUTCOME_NAV = { All: 'All applicants', Recommended: 'Recommended', Waitlist: 'Waitlist', Hold: 'On hold', Reject: 'Rejected' };
-const OUTCOME_ICON = { All: '📋', Recommended: '✅', Waitlist: '⏳', Hold: '✋', Reject: '⛔' };
-// Projects live in this browser only (no database). Bump the version if the saved shape changes.
+const OUTCOME_NAV = { All: 'All applicants', Recommended: 'Recommended', Conditional: 'Conditional', Redirect: 'Redirect', Waitlist: 'Waitlist', Hold: 'On hold', Reject: 'Rejected', Withdrawn: 'Withdrawn' };
+const OUTCOME_ICON = { All: '📋', Recommended: '✅', Conditional: '☑️', Redirect: '↪️', Waitlist: '⏳', Hold: '✋', Reject: '⛔', Withdrawn: '🚪' };
+// Saved reviews (one per uploaded sheet) live in this browser only (no database). Bump the version if the saved shape changes.
 const STORE_KEY = 'franchEyes.projects.v1';
 
-function applyOverrides(base, overrides) {
-  if (!base) return null;
-  return {
-    ...base,
-    applications: base.applications.map((a) => (overrides[a.id] ? { ...a, ...overrides[a.id] } : a)),
-  };
-}
+const nextLabel = (n) => (n ? `${n.type} ${new Date(n.when).toLocaleString('en-IN')}` : '');
 
 function toCsv(result, p) {
-  const head = ['Application ID', 'Name', 'City', 'Pin code', 'Territory', 'Outcome', 'Franchisee readiness score', 'Readiness label', 'Allocation score', 'Reason', 'Next steps', 'Bookmarked', 'Your note'];
+  const head = ['Application ID', 'Name', 'City', 'Pin code', 'Territory', 'Outcome', 'Franchisee readiness score', 'Readiness label', 'Allocation score', 'Reason', 'Next steps', 'Next scheduled', 'Bookmarked', 'Your note'];
   const esc = (v) => `"${String(v ?? '').replace(/"/g, '""')}"`;
   const rows = sortDecisions(Object.values(result.decisions)).map((d) => [
     d.id, d.applicant.name, d.applicant.city, d.applicant.pin, d.territoryId, d.outcome,
     d.readiness.total, d.readiness.band, d.score, d.reason, d.plan.nextSteps.join(' | '),
+    nextLabel(nextScheduled((p.schedule || {})[d.id])),
     p.bookmarks[d.id] ? 'Yes' : '', p.notes[d.id] || '',
   ]);
   return [head, ...rows].map((r) => r.map(esc).join(',')).join('\n');
@@ -73,6 +69,7 @@ export default function Page() {
   const p = projects.find((x) => x.id === activeId) || null;
   const data = useMemo(() => (p ? applyOverrides(p.base, p.overrides) : null), [p?.base, p?.overrides]);
   const result = useMemo(() => (data ? runEngine(data, p.profile, { updated: p.overrides }) : null), [data, p?.profile, p?.overrides]);
+  const lookup = useMemo(() => (p ? makeLookup(p.base, p.overrides) : null), [p?.base, p?.overrides]);
 
   // Update one field of the active project; accepts a value or an updater function, like setState.
   const setField = (key) => (v) =>
@@ -83,6 +80,8 @@ export default function Page() {
   const setMessages = setField('messages');
   const setNotes = setField('notes');
   const setBookmarks = setField('bookmarks');
+  const setSchedule = setField('schedule');
+  const setAgreements = setField('agreements');
 
   function resetView() {
     setView('list');
@@ -98,22 +97,23 @@ export default function Page() {
     resetView();
   }
 
-  async function createProject(file, meta) {
+  async function createProject(file) {
     setError('');
     try {
       const parsed = parseWorkbook(await file.arrayBuffer());
       if (!parsed.applications.length) throw new Error('The Applications sheet has no rows below the header. Add applicants from row 4 and upload again.');
-      const profile = { ...profileFor(meta.category, meta.brand), categoryName: meta.categoryName || '' };
       const proj = {
         id: `p${Date.now().toString(36)}`,
         createdAt: Date.now(),
         fileName: file.name,
         base: parsed,
-        profile,
+        profile: DEFAULT_PROFILE,
         overrides: {},
         review: {},
         notes: {},
         bookmarks: {},
+        schedule: {},
+        agreements: {},
         messages: [],
       };
       setProjects((ps) => [...ps, proj]);
@@ -124,7 +124,7 @@ export default function Page() {
   }
 
   function deleteProject() {
-    if (!p || !window.confirm(`Delete the ${p.profile.brandName} project and its bookmarks, notes and chat? This can’t be undone.`)) return;
+    if (!p || !window.confirm(`Delete the review of ${p.fileName} and its bookmarks, notes, schedule and chat? This can’t be undone.`)) return;
     setProjects((ps) => ps.filter((x) => x.id !== p.id));
     setActiveId(null);
     setScreen('home');
@@ -151,7 +151,7 @@ export default function Page() {
     const changedIds = [...new Set([...updates.map((u) => u.id), ...changes.map((c) => c.id)])];
     setReview((r) => {
       const copy = { ...r };
-      for (const c of changes) if (c.from === 'Recommended' && c.to !== 'Recommended') delete copy[c.id];
+      for (const c of changes) if (['Recommended', 'Conditional'].includes(c.from) && !['Recommended', 'Conditional'].includes(c.to)) delete copy[c.id];
       return copy;
     });
     setFlash(changedIds);
@@ -177,12 +177,24 @@ export default function Page() {
     });
   }
 
+  function addSchedule(id, item) {
+    setSchedule((s) => ({ ...(s || {}), [id]: [...((s || {})[id] || []), item] }));
+  }
+
+  function removeSchedule(id, itemId) {
+    setSchedule((s) => ({ ...(s || {}), [id]: ((s || {})[id] || []).filter((x) => x.id !== itemId) }));
+  }
+
+  function saveAgreement(id, values) {
+    setAgreements((a) => ({ ...(a || {}), [id]: values }));
+  }
+
   function exportCsv() {
     const blob = new Blob([toCsv(result, p)], { type: 'text/csv;charset=utf-8' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `${p.profile.brandName.replace(/[^\w-]+/g, '-').toLowerCase() || 'franchise'}-decisions.csv`;
+    a.download = 'franchise-decisions.csv';
     a.click();
     URL.revokeObjectURL(url);
   }
@@ -191,31 +203,36 @@ export default function Page() {
   const all = inProject ? Object.values(result.decisions) : [];
   const bookmarkCount = inProject ? all.filter((d) => p.bookmarks[d.id]).length : 0;
   const noteCount = inProject ? all.filter((d) => p.notes[d.id]).length : 0;
+  const schedules = p?.schedule || {};
+  const scheduledCount = inProject ? all.filter((d) => (schedules[d.id] || []).length).length : 0;
   const q = query.trim().toLowerCase();
   const inView = (d) =>
     view === 'bookmarks' ? !!p.bookmarks[d.id]
     : view === 'notes' ? !!p.notes[d.id]
+    : view === 'scheduled' ? (schedules[d.id] || []).length > 0
     : filter === 'All' || d.outcome === filter;
   const shown = all
     .filter(inView)
     .filter((d) => terr === 'All' || (terr === 'none' ? !d.territoryId : d.territoryId === terr))
     .filter((d) => !q || [d.id, d.applicant.name, d.applicant.city, d.applicant.pin, d.territoryId, p.notes[d.id]].some((v) => String(v ?? '').toLowerCase().includes(q)));
-  const listView = view === 'list' || view === 'bookmarks' || view === 'notes';
+  const listView = ['list', 'bookmarks', 'notes', 'scheduled'].includes(view);
   const noTerritory = all.filter((d) => !d.territoryId).length;
 
-  const brand = p?.profile.brandName || '';
-  const title = view === 'territories' ? <>{brand} <mark>territories</mark></>
-    : view === 'rules' ? <>{brand} <mark>brand rules</mark></>
+  const title = view === 'territories' ? <>Territory <mark>board</mark></>
+    : view === 'rules' ? <>Brand <mark>rules</mark></>
+    : view === 'scheduled' ? <>Scheduled <mark>next steps</mark></>
     : view === 'bookmarks' ? <>Your <mark>bookmarks</mark></>
     : view === 'notes' ? <>Your <mark>notes</mark></>
-    : filter === 'All' ? <>{brand} <mark>partner review</mark></>
+    : filter === 'All' ? <>This batch’s <mark>partner review</mark></>
     : <>{OUTCOME_NAV[filter]} <mark>partners</mark></>;
 
   const emptyText = view === 'bookmarks'
     ? 'No bookmarks yet. Open a candidate and click ☆ Bookmark, or use the star on any row.'
     : view === 'notes'
       ? 'No notes yet. Open a candidate and write a note in “Your note”.'
-      : 'No applicants match this view.';
+      : view === 'scheduled'
+        ? 'Nothing scheduled yet. Open a recommended partner and use Take next step.'
+        : 'No applicants match this view.';
 
   return (
     <div className="app">
@@ -225,18 +242,18 @@ export default function Page() {
           <b>FranchEyes</b>
         </button>
 
-        <div className="nav-label">Projects</div>
-        <nav className="nav" aria-label="Projects">
+        <div className="nav-label">Saved reviews</div>
+        <nav className="nav" aria-label="Saved reviews">
           {projects.map((x) => (
             <button
               key={x.id}
               className="nav-item proj"
               aria-pressed={screen === 'project' && x.id === activeId}
-              aria-label={`${x.profile.brandName} project, ${categoryLabel(x.profile)}`}
+              aria-label={`Review of ${x.fileName}, uploaded ${new Date(x.createdAt).toLocaleString('en-IN')}`}
               onClick={() => openProject(x.id)}
             >
-              <span aria-hidden="true">🏷️</span>
-              <span className="proj-name"><b>{x.profile.brandName}</b><small>{categoryLabel(x.profile)}</small></span>
+              <span aria-hidden="true">📄</span>
+              <span className="proj-name"><b>{x.fileName}</b><small>{x.base.applications.length} applicants · {new Date(x.createdAt).toLocaleString('en-IN', { day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit' })}</small></span>
             </button>
           ))}
           <button className="nav-item new" aria-pressed={screen === 'new'} onClick={() => { setScreen('new'); setError(''); setOpenId(null); }}>
@@ -246,9 +263,9 @@ export default function Page() {
 
         {inProject ? (
           <>
-            <div className="nav-label">{brand}</div>
+            <div className="nav-label">This review</div>
             <nav className="nav" aria-label="Applicants by outcome">
-              {['All', ...OUTCOMES].map((o) => (
+              {['All', ...OUTCOMES].filter((o) => o === 'All' || o !== 'Withdrawn' || result.counts.Withdrawn).map((o) => (
                 <button key={o} className="nav-item" aria-pressed={view === 'list' && filter === o} onClick={() => showView('list', o)}>
                   <span aria-hidden="true">{OUTCOME_ICON[o]}</span>{OUTCOME_NAV[o]}
                   <span className="n num">{o === 'All' ? all.length : result.counts[o]}</span>
@@ -262,6 +279,9 @@ export default function Page() {
               </button>
               <button className="nav-item" aria-pressed={view === 'notes'} onClick={() => showView('notes')}>
                 <span aria-hidden="true">📝</span>Notes<span className="n num">{noteCount}</span>
+              </button>
+              <button className="nav-item" aria-pressed={view === 'scheduled'} onClick={() => showView('scheduled')}>
+                <span aria-hidden="true">📅</span>Scheduled<span className="n num">{scheduledCount}</span>
               </button>
             </nav>
             <div className="nav-label">Batch</div>
@@ -278,7 +298,7 @@ export default function Page() {
               {Object.keys(p.overrides).length ? (
                 <button className="mini-btn" onClick={() => setOverrides({})}>Undo chat updates ({Object.keys(p.overrides).length})</button>
               ) : null}
-              <button className="mini-btn danger" onClick={deleteProject}>Delete project</button>
+              <button className="mini-btn danger" onClick={deleteProject}>Delete this review</button>
             </div>
           </>
         ) : null}
@@ -286,16 +306,16 @@ export default function Page() {
 
       <main className="main">
         {!loaded ? null : screen === 'home' ? (
-          <Home projects={projects} onNew={() => { setScreen('new'); setError(''); }} onOpen={openProject} />
+          <Home reviews={projects} onUpload={() => { setScreen('new'); setError(''); }} onOpen={openProject} />
         ) : screen === 'new' || !inProject ? (
-          <Upload onCreate={createProject} error={error} firstTime={!projects.length} />
+          <Upload onCreate={createProject} error={error} />
         ) : (
           <>
             <div className="head">
               <div>
                 <h1>{title}</h1>
                 <p>
-                  {categoryLabel(p.profile)} · {all.length} applications · {result.territories.length} territories · {result.counts.Recommended} recommended
+                  {all.length} applications · {result.territories.length} territories · {result.counts.Recommended} recommended · {p.fileName}
                 </p>
               </div>
               <div className="actions">
@@ -341,6 +361,7 @@ export default function Page() {
                     review={p.review}
                     bookmarks={p.bookmarks}
                     notes={p.notes}
+                    schedules={schedules}
                     onToggleBookmark={toggleBookmark}
                     emptyText={emptyText}
                   />
@@ -371,7 +392,8 @@ export default function Page() {
               key={p.id}
               result={result}
               profile={p.profile}
-              personal={{ bookmarks: p.bookmarks, notes: p.notes }}
+              personal={{ bookmarks: p.bookmarks, notes: p.notes, schedule: schedules, stores: data.stores }}
+              lookup={lookup}
               messages={p.messages}
               setMessages={setMessages}
               applyUpdates={applyUpdates}
@@ -388,6 +410,12 @@ export default function Page() {
             onToggleBookmark={toggleBookmark}
             note={(openId && p.notes[openId]) || ''}
             onNote={saveNote}
+            profile={p.profile}
+            schedule={(openId && schedules[openId]) || []}
+            onAddSchedule={addSchedule}
+            onRemoveSchedule={removeSchedule}
+            agreement={(openId && (p.agreements || {})[openId]) || {}}
+            onAgreement={saveAgreement}
           />
           <Rubric open={rubricOpen} onClose={() => setRubricOpen(false)} profile={p.profile} />
         </>

@@ -7,6 +7,7 @@ export default function TerritoryBoard({ territories, onApplicant }) {
       <div className="legend" aria-hidden="true">
         <span><i style={{ background: 'var(--ink)' }} />Existing store</span>
         <span><i style={{ background: 'var(--rec-bg)' }} />Recommended applicant</span>
+        <span><i style={{ background: 'var(--hl-soft)', borderStyle: 'dashed' }} />Offered to a redirected applicant</span>
         <span><i style={{ borderStyle: 'dashed', background: '#fff' }} />Open</span>
       </div>
       <div className="board">
@@ -22,8 +23,8 @@ export default function TerritoryBoard({ territories, onApplicant }) {
             </div>
             <div className="pins">
               {t.pinsState.map((p) =>
-                p.status === 'awarded' ? (
-                  <button key={p.pin} className="pin awarded" onClick={() => onApplicant(p.by)} title={`Recommended: ${p.by}`}>
+                p.status === 'awarded' || p.status === 'offered' ? (
+                  <button key={p.pin} className={`pin ${p.status}`} onClick={() => onApplicant(p.by)} title={p.status === 'offered' ? `Offered to ${p.by} (redirect)` : `Recommended: ${p.by}`}>
                     {p.pin} <em>{p.by}</em>
                   </button>
                 ) : (
